@@ -17,7 +17,7 @@ check_jq() {
 
 # List icon directories
 list_icon_directories() {
-    local OWNER="jeeftor"
+    local OWNER="fletsche"
     local REPO="HomeAssistant"
     local BRANCH="master"
     local DIRECTORY="icons"
@@ -35,7 +35,7 @@ list_icon_directories() {
 
 # List icons within a directory
 list_icons() {
-    local OWNER="jeeftor"
+    local OWNER="fletsche"
     local REPO="HomeAssistant"
     local BRANCH="master"
     local DIRECTORY="icons/$1"
@@ -70,16 +70,17 @@ upload_icon() {
     local ICON_NAME="$2"
     local FILE_NAME="$3"
 
-    URL="http://$IP_ADDRESS/edit"
+    # AWTRIX NG upload endpoint (AWTRIX 3 used /edit)
+    URL="http://$IP_ADDRESS/api/v1/files?dir=/ICONS"
     TEMP_FILE=".$FILE_NAME"
 
-    BASE_URL="https://raw.githubusercontent.com/jeeftor/HomeAssistant/master/icons/"
+    BASE_URL="https://raw.githubusercontent.com/fletsche/HomeAssistant/master/icons/"
     GIF_FILE="$BASE_URL/$ICON_NAME"
 
     curl -L -s -X GET "$GIF_FILE" -o "$TEMP_FILE"
 
     if verify_gif "$TEMP_FILE"; then
-        curl -X POST -F "file=@$TEMP_FILE;filename=/ICONS/$FILE_NAME" "$URL"
+        curl -X POST -F "file=@$TEMP_FILE;filename=$FILE_NAME" "$URL"
         echo -e "${GREEN}Uploaded icon:${NC} $FILE_NAME${NC}"
     else
         echo -e "${RED}Error: File $FILE_NAME does not appear to be a valid GIF file.${NC}"

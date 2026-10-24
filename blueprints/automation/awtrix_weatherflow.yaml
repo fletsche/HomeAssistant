@@ -1,17 +1,19 @@
 ---
 blueprint:
-  name: AWTRIX Weather ⛈️ + Forecast + 🌕️ (Service Calls)
+  name: AWTRIX NG Weather ⛈️ + Forecast + 🌕️ (Service Calls)
   description: >
     This is somewhat of a mega-weather blueprint with moon phase support. However for it work correctly you will need a variety of different things setup. It was initially designed to use in partnership with a personal weather station however it seems to work fine with OpenWeather as well or any other provider that offers an hourly forecast.
 
 
 
-    ![](https://raw.githubusercontent.com/jeeftor/HomeAssistant/master/docs/weather.gif)
+    ![](https://raw.githubusercontent.com/fletsche/HomeAssistant/master/docs/weather.gif)
 
 
-    ![](https://raw.githubusercontent.com/jeeftor/HomeAssistant/master/docs/sunset.gif)
+    ![](https://raw.githubusercontent.com/fletsche/HomeAssistant/master/docs/sunset.gif)
 
-    This blueprint will publish to two separate topics.  `jeef_weather` for the weather report and `jeef_weather_sun` if its near sunrise/set
+    This blueprint is written for [AWTRIX NG](https://github.com/Blueforcer/awtrix-ng) (not AWTRIX 3). It pushes two apps: `jeef_weather` for the weather report and `jeef_weather_sun` if its near sunrise/set (`<prefix>/cmd/apps/pushed/<app>`).
+
+    The topic prefix is read from the device's **MQTT prefix** sensor, so Home Assistant discovery must be enabled on the clock.
 
     ## ⚠️ REQUIREMENTS ⚠️
 
@@ -65,12 +67,12 @@ blueprint:
       
       (If you have windows I don't know if this will work)
 
-        bash -c "$(curl -fsSL https://raw.githubusercontent.com/jeeftor/HomeAssistant/master/icons/upload_icon.sh)"
+        bash -c "$(curl -fsSL https://raw.githubusercontent.com/fletsche/HomeAssistant/master/icons/upload_icon.sh)"
 
     _This blueprint ~will~ may be updated as new features_
 
     ![](https://www.gravatar.com/avatar/3b9968835eb719e5d78a04ba7a2bafbd?s=64)
-    https://raw.githubusercontent.com/jeeftor/HomeAssistant/master/blueprints/automation/awtrix_weatherflow.yaml
+    https://raw.githubusercontent.com/fletsche/HomeAssistant/master/blueprints/automation/awtrix_weatherflow.yaml
 
   domain: automation
   input:
@@ -82,7 +84,7 @@ blueprint:
           filter:
             integration: mqtt
             manufacturer: Blueforcer
-            model: AWTRIX 3
+            model: AWTRIX NG
           multiple: true
 
     forecast_var:
@@ -291,25 +293,7 @@ blueprint:
       name: Swap Clear Night for Moon
       description: >-
 
-        The default case is for the moon to be drawn to the right-side of the clock, however, you have the option if this is selected to repalce the `clear_night` icon with the moon icon. This will only swap icons if the moon is currently being displayed.
-
-        - ![](https://developer.lametric.com/content/apps/icon_thumbs/2314_icon_thumb.png?v=1) - `full_moon`
-
-        - ![](https://developer.lametric.com/content/apps/icon_thumbs/2315_icon_thumb.png?v=1) - `waning_gibbous`
-
-        - ![](https://developer.lametric.com/content/apps/icon_thumbs/2316_icon_thumb.png?v=1) - `last_quarter`
-
-        - ![](https://developer.lametric.com/content/apps/icon_thumbs/2317_icon_thumb.png?v=1) - `waning_crescent`
-
-        - ![](https://developer.lametric.com/content/apps/icon_thumbs/2318_icon_thumb.png?v=1) - `new_moon`
-
-        - ![](https://developer.lametric.com/content/apps/icon_thumbs/2319_icon_thumb.png?v=1) - `waxing_crescent`
-
-        - ![](https://developer.lametric.com/content/apps/icon_thumbs/2320_icon_thumb.png?v=1) - `first_quarter`
-
-        - ![](https://developer.lametric.com/content/apps/icon_thumbs/2321_icon_thumb.png?v=1) - `waxing_gibbous`
-
-        If you wish to use a different icon please enter its text in the box to the right
+        The default case is for the moon to be drawn to the right-side of the clock, however, you have the option if this is selected to replace the `clear-night` weather icon with the drawn moon (current phase). This will only swap icons if the moon is currently being displayed.
       selector:
         boolean:
       default: True
@@ -587,16 +571,15 @@ variables:
   device_ids: !input awtrix
   app_topic: jeef_weather
   topics: >-
-    {%- macro get_device_topic(device_id) %}
-    {{ states((device_entities(device_id) | select('search','device_topic') | list)[0]) }}
-    {%- endmacro %}
-
     {%- set ns = namespace(devices=[]) %}
     {%- for device_id in device_ids %}
-      {%- set device=get_device_topic(device_id)|replace(' ','') %}
-      {% set ns.devices = ns.devices + [ device ~ '/custom/' ~ app_topic] %}
+      {%- set e = device_entities(device_id) | select('search','mqtt_prefix') | list %}
+      {%- set prefix = states(e[0]) | replace(' ','') if e else 'unknown' %}
+      {%- if prefix not in ['unknown','unavailable',''] %}
+        {%- set ns.devices = ns.devices + [ prefix ~ '/cmd/apps/pushed/' ~ app_topic] %}
+      {%- endif %}
     {%- endfor %}
-    {{ ns.devices | reject('match','unavailable') | list}}
+    {{ ns.devices }}
 
   #---------------------------------
   # Weather Variables
@@ -701,37 +684,30 @@ variables:
     {%- set ts_set = set |as_timestamp %}
     {{ iif(sun_next_event == 'sunrise',(ts_rise - utcnow()|as_timestamp) / 60,(ts_set - utcnow()|as_timestamp) / 60) | round(0) }}
 
-  sun_next_str: >-
-    {%- set rise = state_attr('sun.sun','next_rising') %}
-    {%- set set = state_attr('sun.sun','next_setting') %}
-    {%- set ts_rise = rise |as_timestamp %}
-    {%- set ts_set = set |as_timestamp %}
-    {%- if sun_time_type == 'Actual' %}
-      {{ iif(sun_next_event == 'sunrise',(ts_rise | as_datetime | as_local).strftime(sun_time_format),  (ts_set | as_datetime | as_local).strftime(sun_time_format)) }}
-    {%- else %}
-    {#- relative time #}
-      {% set hours = sun_min_until_next_event // 60 %}
-      {% set remaining_minutes = sun_min_until_next_event % 60 %}
-
-      {% if hours == 0 %}
-          {{ remaining_minutes }} min
-      {% else %}
-          [
-            {"t":"{{hours}}", "c":"#ffffff"},
-            {"t":"h", "c":"#9c9d97"},
-            {"t":"{{remaining_minutes}}", "c":"#ffffff"},
-            {"t":"m", "c":"#9c9d97"}
-        ]
-      {% endif %}
-      
-    {%- endif %}
   sun_event_icon: >-
     {{ iif(sun_next_event == 'sunrise', icon_sunrise, icon_sunset) }}
-  sun_event_payload: >-
-    {"icon":"{{sun_event_icon}}", "text":"{{sun_next_str}}", "duration": {{message_duration_riseset}}}
+  # Built as JSON in one template: HA would turn partial results into native types
   sun_payload: >-
-    {%- if show_sun_rise_set %}
-    {{ iif(sun_event_minute_threshold >= sun_min_until_next_event, sun_event_payload, "{}") }}
+    {%- set rise = state_attr('sun.sun','next_rising') | as_timestamp %}
+    {%- set set = state_attr('sun.sun','next_setting') | as_timestamp %}
+    {%- if sun_time_type == 'Actual' %}
+      {%- set text = (iif(sun_next_event == 'sunrise', rise, set) | as_datetime | as_local).strftime(sun_time_format) %}
+    {%- else %}
+      {%- set hours = (sun_min_until_next_event // 60) | int %}
+      {%- set remaining_minutes = (sun_min_until_next_event % 60) | int %}
+      {%- if hours == 0 %}
+        {%- set text = remaining_minutes ~ ' min' %}
+      {%- else %}
+        {%- set text = [
+          {"text": hours | string, "color": "#ffffff"},
+          {"text": "h", "color": "#9c9d97"},
+          {"text": remaining_minutes | string, "color": "#ffffff"},
+          {"text": "m", "color": "#9c9d97"}
+        ] %}
+      {%- endif %}
+    {%- endif %}
+    {%- if show_sun_rise_set and sun_event_minute_threshold >= sun_min_until_next_event %}
+    {{ {"icon": sun_event_icon | string, "text": text, "durationMs": (message_duration_riseset | int) * 1000} | to_json }}
     {%- else %}
     {}
     {%- endif %}
@@ -757,16 +733,6 @@ variables:
   icon_sunny: !input icon_sunny
   icon_windy: !input icon_windy
   icon_windy_variant: !input icon_windy_variant
-  clear_night_dict: >-
-    {{ dict({
-      'full_moon': '2314',
-      'waning_gibbous': '2315',
-      'last_quarter': '2316',
-      'waning_crescent': '2317',
-      'new_moon': '2318',
-      'waxing_crescent': '2319',
-      'first_quarter': '2320',
-      'waxing_gibbous': '2321'}) }}
   color_matrix_json: !input color_matrix_json
   color_dict: >-
     {% set b = color_matrix_json | from_json %}    
@@ -797,14 +763,15 @@ variables:
   #--------------
   # Weather Icon
   #--------------
-  icon: >
-    {%- if ((current_condition == 'clear_night') and use_moon_clear_night) %}
-      {{clear_night_dict[moon_phase]}}
-    {%- elif (sun_next_event == 'sunrise') and use_moon_sunny_night and (current_condition == 'sunny') -%}
-      
-    {%- else %}
-      {{ icon_dict[current_condition] }}
-    {%- endif %}
+  # True when the drawn moon takes the place of the weather icon
+  moon_as_icon: >-
+    {{ show_moon and ((current_condition == 'clear-night' and use_moon_clear_night)
+       or (sun_next_event == 'sunrise' and use_moon_sunny_night and current_condition == 'sunny')) }}
+  icon: >-
+    {%- if moon_as_icon -%}
+    {%- else -%}
+      {{ icon_dict[current_condition] | default('') }}
+    {%- endif -%}
   #-----------
   # Moon Icon
   #-----------
@@ -812,34 +779,32 @@ variables:
   moon_data: >
     {%- macro draw_moon(phase,x=22,y=0) %}
       {%- if phase == 'first_quarter'  %}
-        {"db":[{{x}},{{y}},8,8,[0,0,3355443,3355443,14079702,14079702,0,0,0,3355443,3355443,3355443,15790320,14079702,14079702,0,3355443,3355443,3355443,3355443,13355979,13355979,14079702,14079702,3355443,3355443,1644825,3355443,13355979,15790320,15790320,14079702,3355443,3355443,1644825,3355443,15790320,15790320,15790320,14079702,3355443,3355443,3355443,3355443,15790320,13355979,14079702,14079702,0,3355443,3355443,3355443,15790320,14079702,14079702,0,0,0,3355443,3355443,14079702,14079702,0,0]]}
+        ["bitmap",{{x}},{{y}},8,8,[0,0,3355443,3355443,14079702,14079702,0,0,0,3355443,3355443,3355443,15790320,14079702,14079702,0,3355443,3355443,3355443,3355443,13355979,13355979,14079702,14079702,3355443,3355443,1644825,3355443,13355979,15790320,15790320,14079702,3355443,3355443,1644825,3355443,15790320,15790320,15790320,14079702,3355443,3355443,3355443,3355443,15790320,13355979,14079702,14079702,0,3355443,3355443,3355443,15790320,14079702,14079702,0,0,0,3355443,3355443,14079702,14079702,0,0]]
       {%- endif  %}
       {%- if phase == 'full_moon'  %}
-        {"db":[{{x}},{{y}},8,8,[0,0,14079702,14079702,14079702,14079702,0,0,0,14079702,14079702,15790320,15790320,14079702,14079702,0,14079702,14079702,15790320,15790320,11974326,11974326,14079702,14079702,14079702,15790320,11974326,15790320,11974326,15790320,15790320,14079702,14079702,15790320,11974326,15790320,15790320,15790320,15790320,14079702,14079702,14079702,15790320,15790320,15790320,11974326,14079702,14079702,0,14079702,14079702,11974326,15790320,14079702,14079702,0,0,0,14079702,14079702,14079702,14079702,0,0]]}
+        ["bitmap",{{x}},{{y}},8,8,[0,0,14079702,14079702,14079702,14079702,0,0,0,14079702,14079702,15790320,15790320,14079702,14079702,0,14079702,14079702,15790320,15790320,11974326,11974326,14079702,14079702,14079702,15790320,11974326,15790320,11974326,15790320,15790320,14079702,14079702,15790320,11974326,15790320,15790320,15790320,15790320,14079702,14079702,14079702,15790320,15790320,15790320,11974326,14079702,14079702,0,14079702,14079702,11974326,15790320,14079702,14079702,0,0,0,14079702,14079702,14079702,14079702,0,0]]
       {%- endif  %}
       {%- if phase == 'last_quarter'  %}
-        {"db":[{{x}},{{y}},8,8,[0,0,14079702,14079702,3487029,3487029,0,0,0,14079702,14079702,15790320,3487029,3487029,3487029,0,14079702,14079702,15790320,15790320,1907997,1907997,3487029,3487029,14079702,15790320,13553358,15790320,1907997,3487029,3487029,3487029,14079702,15790320,13553358,15790320,3487029,3487029,3487029,3487029,14079702,14079702,15790320,15790320,3487029,1907997,3487029,3487029,0,14079702,14079702,13553358,3487029,3487029,3487029,0,0,0,14079702,14079702,3487029,3487029,0,0]]}
+        ["bitmap",{{x}},{{y}},8,8,[0,0,14079702,14079702,3487029,3487029,0,0,0,14079702,14079702,15790320,3487029,3487029,3487029,0,14079702,14079702,15790320,15790320,1907997,1907997,3487029,3487029,14079702,15790320,13553358,15790320,1907997,3487029,3487029,3487029,14079702,15790320,13553358,15790320,3487029,3487029,3487029,3487029,14079702,14079702,15790320,15790320,3487029,1907997,3487029,3487029,0,14079702,14079702,13553358,3487029,3487029,3487029,0,0,0,14079702,14079702,3487029,3487029,0,0]]
       {%- endif  %}
       {%- if phase == 'new_moon' %}
-        {"db":[{{x}},{{y}},8,8,[0,0,2763306,2763306,2763306,2763306,0,0,0,2763306,2763306,2763306,2763306,2763306,2763306,0,2763306,2763306,2763306,2763306,1842204,1842204,2763306,2763306,2763306,2763306,1842204,2763306,1842204,2763306,2763306,2763306,2763306,2763306,1842204,2763306,2763306,2763306,2763306,2763306,2763306,2763306,2763306,2763306,2763306,1842204,2763306,2763306,0,2763306,2763306,1842204,2763306,2763306,2763306,0,0,0,2763306,2763306,2763306,2763306,0,0]]}
+        ["bitmap",{{x}},{{y}},8,8,[0,0,2763306,2763306,2763306,2763306,0,0,0,2763306,2763306,2763306,2763306,2763306,2763306,0,2763306,2763306,2763306,2763306,1842204,1842204,2763306,2763306,2763306,2763306,1842204,2763306,1842204,2763306,2763306,2763306,2763306,2763306,1842204,2763306,2763306,2763306,2763306,2763306,2763306,2763306,2763306,2763306,2763306,1842204,2763306,2763306,0,2763306,2763306,1842204,2763306,2763306,2763306,0,0,0,2763306,2763306,2763306,2763306,0,0]]
       {%- endif  %}
       {%- if phase == 'waning_crescent'  %}
-        {"db":[{{x}},{{y}},8,8,[0,0,14079702,14079702,2763306,2763306,0,0,0,14079702,14079702,2763306,2763306,2763306,2763306,0,14079702,14079702,2763306,2763306,1842204,1842204,2763306,2763306,14079702,15790320,1842204,2763306,1842204,2763306,2763306,2763306,14079702,15790320,1842204,2763306,2763306,2763306,2763306,2763306,14079702,14079702,2763306,2763306,2763306,1842204,2763306,2763306,0,14079702,14079702,1842204,2763306,2763306,2763306,0,0,0,14079702,14079702,2763306,2763306,0,0]]}
+        ["bitmap",{{x}},{{y}},8,8,[0,0,14079702,14079702,2763306,2763306,0,0,0,14079702,14079702,2763306,2763306,2763306,2763306,0,14079702,14079702,2763306,2763306,1842204,1842204,2763306,2763306,14079702,15790320,1842204,2763306,1842204,2763306,2763306,2763306,14079702,15790320,1842204,2763306,2763306,2763306,2763306,2763306,14079702,14079702,2763306,2763306,2763306,1842204,2763306,2763306,0,14079702,14079702,1842204,2763306,2763306,2763306,0,0,0,14079702,14079702,2763306,2763306,0,0]]
       {%- endif  %}
       {%- if phase == 'waning_gibbous'  %}
-        {"db":[{{x}},{{y}},8,8,[0,0,14079702,14079702,3552822,3552822,0,0,0,14079702,14079702,15790320,15790320,3552822,3552822,0,14079702,14079702,15790320,15790320,13421772,13421772,3552822,3552822,14079702,15790320,13421772,15790320,13421772,15790320,3552822,3552822,14079702,15790320,13421772,15790320,15790320,15790320,3552822,3552822,14079702,14079702,15790320,15790320,15790320,13421772,3552822,3552822,0,14079702,14079702,13421772,15790320,3552822,3552822,0,0,0,14079702,14079702,3552822,3552822,0,0]]}
+        ["bitmap",{{x}},{{y}},8,8,[0,0,14079702,14079702,3552822,3552822,0,0,0,14079702,14079702,15790320,15790320,3552822,3552822,0,14079702,14079702,15790320,15790320,13421772,13421772,3552822,3552822,14079702,15790320,13421772,15790320,13421772,15790320,3552822,3552822,14079702,15790320,13421772,15790320,15790320,15790320,3552822,3552822,14079702,14079702,15790320,15790320,15790320,13421772,3552822,3552822,0,14079702,14079702,13421772,15790320,3552822,3552822,0,0,0,14079702,14079702,3552822,3552822,0,0]]
       {%- endif  %}
       {%- if phase == 'waxing_crescent'  %}
-        {"db":[{{x}},{{y}},8,8,[0,0,3355443,3355443,14079702,14079702,0,0,0,3355443,3355443,3355443,3355443,14079702,14079702,0,3355443,3355443,3355443,3355443,1644825,1644825,14079702,14079702,3355443,3355443,1644825,3355443,1644825,3355443,15790320,14079702,3355443,3355443,1644825,3355443,3355443,3355443,15790320,14079702,3355443,3355443,3355443,3355443,3355443,1644825,14079702,14079702,0,3355443,3355443,3355443,3355443,14079702,14079702,0,0,0,3355443,3355443,14079702,14079702,0,0]]}
+        ["bitmap",{{x}},{{y}},8,8,[0,0,3355443,3355443,14079702,14079702,0,0,0,3355443,3355443,3355443,3355443,14079702,14079702,0,3355443,3355443,3355443,3355443,1644825,1644825,14079702,14079702,3355443,3355443,1644825,3355443,1644825,3355443,15790320,14079702,3355443,3355443,1644825,3355443,3355443,3355443,15790320,14079702,3355443,3355443,3355443,3355443,3355443,1644825,14079702,14079702,0,3355443,3355443,3355443,3355443,14079702,14079702,0,0,0,3355443,3355443,14079702,14079702,0,0]]
       {%- endif  %}
       {%- if phase == 'waxing_gibbous'  %}
-        {"db":[{{x}},{{y}},8,8,[0,0,3355443,3355443,14079702,14079702,0,0,0,3355443,3355443,14079702,15790320,14079702,14079702,0,3355443,3355443,15790320,15790320,12763842,12763842,14079702,14079702,3355443,3355443,12763842,15790320,12763842,15790320,15790320,14079702,3355443,3355443,12763842,15790320,15790320,15790320,15790320,14079702,3355443,3355443,15790320,15790320,15790320,12763842,14079702,14079702,0,3355443,3355443,12763842,15790320,14079702,14079702,0,0,0,3355443,3355443,14079702,14079702,0,0]]}
+        ["bitmap",{{x}},{{y}},8,8,[0,0,3355443,3355443,14079702,14079702,0,0,0,3355443,3355443,14079702,15790320,14079702,14079702,0,3355443,3355443,15790320,15790320,12763842,12763842,14079702,14079702,3355443,3355443,12763842,15790320,12763842,15790320,15790320,14079702,3355443,3355443,12763842,15790320,15790320,15790320,15790320,14079702,3355443,3355443,15790320,15790320,15790320,12763842,14079702,14079702,0,3355443,3355443,12763842,15790320,14079702,14079702,0,0,0,3355443,3355443,14079702,14079702,0,0]]
       {%- endif  %}
     {%- endmacro %}
 
-    {%- if current_condition == 'clear-night' and use_moon_clear_night -%}
-    {{draw_moon(moon_phase,0,0)}}
-    {%- elif(sun_next_event == 'sunrise') and use_moon_sunny_night and (current_condition == 'sunny') -%}
+    {%- if moon_as_icon -%}
     {{draw_moon(moon_phase,0,0)}}
     {%- else -%}
     {{draw_moon(moon_phase,23,0)}}
@@ -928,43 +893,42 @@ action:
 
               {#- Define a macro to draw out the forecast lines#}
                 {%- macro draw_forecast_lines(x,hours,height) %}
-                  {%- for hour in range(hours) %}
+                  {%- for hour in range([hours, forecast | length] | min) %}
                     {%- if height == 0 %}
-                      {"dp": [{{x+hour}},7,"{{interpolate(color_dict, forecast[hour]['temperature']) }}"]}
+                      ["pixel",{{x+hour}},7,"{{interpolate(color_dict, forecast[hour]['temperature']) }}"]
                     {%- else %}
-                      {"dl": [{{x+hour}},7,{{x+hour}},{{7 - height}},"{{interpolate(color_dict, forecast[hour]['temperature']) }}"]}
+                      ["line",{{x+hour}},7,{{x+hour}},{{7 - height}},"{{interpolate(color_dict, forecast[hour]['temperature']) }}"]
                     {%- endif %}
-                    {%- if hour+1 != hours %},{%endif%}
+                    {%- if not loop.last %},{%endif%}
                   {%- endfor %}
                 {%- endmacro %}
 
-                {
-                  "draw": [
-                    {%- if hours_to_show > 0 %}
-                    {{draw_forecast_lines(8,hours_to_show,0)}}
-                  {%- endif %}
-                  {%- if current_temp != 'unavailable' -%}
-                  ,{"dt":[{{text_x}},1,"{{temp_text}}","{{interpolate(color_dict, current_temp | float)}}"]}
-                  {%- else -%}
-                  {"dt":"err"}
-                  {%- endif -%}
+              {%- set ns = namespace(draw=[]) %}
+              {%- if hours_to_show > 0 and forecast | length > 0 %}
+                {%- set ns.draw = ns.draw + [draw_forecast_lines(8,hours_to_show,0)] %}
+              {%- endif %}
+              {%- if current_temp not in ['unavailable', 'unknown', none] %}
+                {%- set ns.draw = ns.draw + [["text", text_x | int, 1, temp_text | string, interpolate(color_dict, current_temp | float)] | to_json] %}
+              {%- else %}
+                {%- set ns.draw = ns.draw + ['["text",' ~ (text_x | int) ~ ',1,"err","#FF0000"]'] %}
+              {%- endif %}
+              {%- if show_moon %}
+                {%- set ns.draw = ns.draw + [moon_data | trim if moon_data is string else moon_data | to_json] %}
+              {%- endif %}
 
-                  {% if show_moon %}
-                  ,{{moon_data}}
-                  {% endif %}
-                  ],
-                  "icon": "{{icon}}",
-                  "duration": {{message_duration}},
-                  "pushIcon": 2,
-                  "lifetime": 120,
-                  "lifetimeMode":1,
-                  "weather": "{{current_condition}}"
-                  }
+                {
+                  "draw": [{{ ns.draw | join(',') }}],
+                  "icon": {{ (icon or '') | string | to_json }},
+                  "durationMs": {{ (message_duration | int) * 1000 }},
+                  "iconMode": "push",
+                  "lifetimeMs": 120000,
+                  "lifetimeExpiry": "mark"
+                }
 
         - action: mqtt.publish
           data:
             qos: 0
             retain: false
-            topic: "{{ repeat.item ~ '_sun'}} "
-            payload: >
-              {{sun_payload}}
+            topic: "{{ repeat.item ~ '_sun' }}"
+            payload: >-
+              {{ sun_payload if sun_payload is string else sun_payload | to_json }}
